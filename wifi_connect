@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+import subprocess
+import getpass
+from prettytable import PrettyTable
+
+# Get a list of available wireless interfaces
+iwconfig_output = subprocess.check_output(["iwconfig"], stderr=subprocess.DEVNULL)
+interfaces = []
+for line in iwconfig_output.splitlines():
+    line = line.strip().decode()
+    if line.startswith("wlan"):
+        interface_name = line.split()[0]
+        interfaces.append(interface_name)
+
+# Prompt the user to select a wireless interface
+if len(interfaces) == 0:
+    print("No wireless interfaces found")
+    exit()
+elif len(interfaces) == 1:
+    selected_interface = interfaces[0]
+    print(f"Using interface: {selected_interface}")
+else:
+    print("Available wireless interfaces:")
+    for i, interface_name in enumerate(interfaces):
+        print(f"{i+1}. {interface_name}")
+    selected_index = int(input("Enter the number of the interface you want to use: "))
+    selected_interface = interfaces[selected_index - 1]
+
+# Scan for available Wi-Fi networks
+scan_output = subprocess.check_output(["nmcli", "-f", "BSSID,SSID,SIGNAL,SECURITY", "d", "wifi", "list", "ifname", selected_interface], encoding="utf-8")
+networks = {}
+for line in scan_output.splitlines()[1:]:
+    fields = line.split()
+    bssid = fields[0]
+    if fields[-2].isdigit():
+        signal_strength = fields[-2]
+        security = " ".join(fields[-1:]).strip("()")
+        network_name = " ".join(fields[1:-2])
+    else:
+        signal_strength = fields[-3] 
+        security = " ".join(fields[-2:]).strip("()")
+        network_name = " ".join(fields[1:-3])
+    networks[bssid] = {"network_name": network_name, "signal_strength": signal_strength, "security": security}
+
+if not networks:
+    print("No Wi-Fi networks found")
+    exit()
+
+# Display list of available Wi-Fi networks in a table
+table = PrettyTable()
+table.field_names = ["#", "BSSID", "SSID", "Signal", "Security"]
+for i, (bssid, network) in enumerate(networks.items(), start=1):
+    network_name = network["network_name"]
+    signal_strength = network["signal_strength"]
+    security = network["security"]
+    table.add_row([i, bssid, network_name, signal_strength, security])
+print(table)
+
+# Prompt for selection and connect to selected network
+selected_network_index = int(input("Enter the number of the network you want to connect to: "))
+selected_bssid = list(networks.keys())[selected_network_index - 1]
+selected_network = networks[selected_bssid]
+
+password = None
+if selected_network["security"] != "--":
+    password = getpass.getpass("Enter the password for the selected network: ")
+else:
+    password = ""
+subprocess.call(["sudo", "nmcli", "d", "wifi", "connect", selected_bssid, "password", password, "ifname", selected_interface])
